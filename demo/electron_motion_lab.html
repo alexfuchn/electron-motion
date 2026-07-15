@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ELECTRON MOTION // 圆柱内时变磁场</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<style>
+/* ========================================
+   CYBERPUNK ELECTRON MOTION LAB  CSS
+   ======================================== */
+:root {
+  --cyber-cyan:    #00e5ff;
+  --accent-red:    #ff3366;
+  --accent-gold:   #ffaa00;
+  --accent-purple: #b44cff;
+  --bg-deep:       #05050f;
+  --bg-panel:      #0a0a1e;
+  --bg-card:       #0f0f28;
+  --text-main:     #c8ccd8;
+  --text-dim:      #6a6a88;
+  --border:        #1a1a3a;
+  --glow-cyan:     0 0 12px rgba(0,229,255,0.4);
+  --glow-red:      0 0 10px rgba(255,51,102,0.4);
+  --glow-gold:     0 0 10px rgba(255,170,0,0.4);
+  --font-mono:    'Share Tech Mono', 'Courier New', monospace;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+html { scroll-behavior:smooth; }
+body {
+  background: var(--bg-deep);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* ========================================
+   OVERLAY LAYERS (z-index 9995-10000)
+   non-interactive
+   ======================================== */
+.scanlines {
+  position: fixed; inset:0; z-index:9997;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0px,
+    transparent 2px,
+    rgba(0,0,0,0.06) 2px,
+    rgba(0,0,0,0.06) 4px
+  );
+}
+.grain {
+  position: fixed; inset:0; z-index:9998;
+  pointer-events: none;
+  opacity: 0.04;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
+}
+.flicker {
+  position: fixed; inset:0; z-index:9999;
+  pointer-events: none;
+  background: transparent;
+  animation: flicker 0.15s infinite;
+}
+@keyframes flicker {
+  0%   { background: transparent; }
+  50%  { background: transparent; }
+  51%  { background: rgba(255,255,255,0.01); }
+  52%  { background: transparent; }
+  100% { background: transparent; }
+}
+
+/* ========================================
+   NAVIGATION
+   ======================================== */
+nav {
+  position: fixed; top:0; width:100%; height:50px;
+  background: rgba(10,10,30,0.92); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 2rem; z-index:9990;
+}
+nav .logo {
+  font-size: 1rem; font-weight: bold;
+  color: var(--cyber-cyan); text-shadow: var(--glow-cyan);
+  letter-spacing: 2px;
+}
+nav .logo span { color: var(--accent-red); }
+nav .menu { display:flex; gap:1.5rem; }
+nav .menu a {
+  color: var(--text-dim); text-decoration:none; font-size:0.8rem;
+  transition: color 0.3s, text-shadow 0.3s;
+}
+nav .menu a:hover { color: var(--cyber-cyan); text-shadow: var(--glow-cyan); }
+
+/* ========================================
+   HERO BANNER
+   ======================================== */
+.hero {
+  height: 100vh;
+  display: flex; flex-direction: column;
+  justify-content: center; align-items: center;
+  text-align: center;
+  position: relative;
+  background: radial-gradient(ellipse at center, #0d0d2a 0%, var(--bg-deep) 70%);
+}
+.hero h1 {
+  font-size: 3rem; letter-spacing: 4px;
+  text-shadow: 0 0 30px var(--cyber-cyan), 0 0 60px rgba(0,229,255,0.3);
+  color: #fff;
+}
+.hero h1 .red { color: var(--accent-red); text-shadow: 0 0 20px var(--accent-red); }
+.hero .subtitle {
+  margin-top: 1rem; font-size: 1rem;
+  color: var(--text-dim); letter-spacing: 3px;
+}
+.hero .equation {
+  margin-top: 2rem;
+  padding: 1.2rem 2.5rem;
+  border: 1px solid var(--border);
+  background: rgba(15,15,40,0.8);
+  border-radius: 4px;
+  color: var(--cyber-cyan); font-size: 1rem;
+  text-shadow: var(--glow-cyan);
+}
+.hero .scroll-hint {
+  position: absolute; bottom: 2rem;
+  color: var(--text-dim); font-size: 0.75rem;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity:0.4; }
+  50%     { opacity:1; }
+}
+
+/* ========================================
+   SIMULATION SECTION
+   ======================================== */
+#lab {
+  min-height: 100vh;
+  display:flex; flex-direction:column; align-items:center;
+  padding: 60px 2rem 3rem;
+}
+.section-title {
+  font-size: 1.4rem; letter-spacing: 3px; color: var(--cyber-cyan);
+  text-shadow: var(--glow-cyan); margin-bottom: 1.5rem;
+}
+.section-title::before { content: '// '; color: var(--text-dim); }
+
+#sim-container {
+  position: relative;
+  width: min(95vw, 1000px);
+  aspect-ratio: 16/10;
+  max-height: 600px;
+  border: 1px solid var(--border);
+  background: #000;
+  box-shadow: 0 0 40px rgba(0,0,0,0.6), inset 0 0 40px rgba(0,0,5,0.6);
+  border-radius: 4px;
+  overflow: hidden;
+}
+canvas {
+  display:block; width:100%; height:100%;
+}
+
+/* ========================================
+   CONTROLS PANEL
+   ======================================== */
+.controls {
+  width: min(95vw, 1000px);
+  margin-top: 1.5rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+.ctrl-group {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 1rem;
+  border-radius: 4px;
+}
+.ctrl-group h3 {
+  font-size: 0.8rem; color: var(--cyber-cyan); letter-spacing: 2px;
+  margin-bottom: 0.8rem; text-shadow: var(--glow-cyan);
+}
+.ctrl-group h3::before { content: '[ '; opacity:0.5; }
+.ctrl-group h3::after  { content: ' ]'; opacity:0.5; }
+.ctrl-group label {
+  display:flex; justify-content:space-between; align-items:center;
+  font-size: 0.7rem; color: var(--text-dim); margin: 0.4rem 0;
+}
+.ctrl-group label span { color: var(--accent-gold); }
+input[type=range] {
+  width:100%; margin:0.3rem 0; accent-color: var(--cyber-cyan);
+  height:4px; cursor:pointer;
+}
+button {
+  font-family: var(--font-mono); font-size:0.7rem; letter-spacing:1px;
+  padding:8px 16px; cursor:pointer; border:1px solid var(--border);
+  background: var(--bg-card); color: var(--text-dim); border-radius:3px;
+  transition: all 0.25s; width:100%; margin:0.2rem 0;
+}
+button:hover { border-color: var(--cyber-cyan); color: var(--cyber-cyan); text-shadow: var(--glow-cyan); }
+button.active {
+  background: rgba(0,229,255,0.1); border-color: var(--cyber-cyan);
+  color: var(--cyber-cyan); box-shadow: var(--glow-cyan);
+}
+button.danger { border-color: rgba(255,51,102,0.4); color: var(--accent-red); }
+button.danger:hover { border-color: var(--accent-red); box-shadow: var(--glow-red); }
+
+/* ========================================
+   DATA READOUT
+   ======================================== */
+.readout {
+  width: min(95vw, 1000px);
+  margin-top: 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 0.8rem 1.2rem;
+  border-radius: 4px;
+  display: flex; flex-wrap: wrap; gap: 1.5rem;
+  font-size: 0.72rem; color: var(--text-dim);
+}
+.readout .item span { color: var(--accent-gold); }
+
+/* ========================================
+   INFO PANELS
+   ======================================== */
+#theory {
+  padding: 4rem 2rem;
+  display:flex; flex-direction:column; align-items:center;
+}
+.info-grid {
+  width: min(95vw, 1000px);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.2rem; margin-top: 2rem;
+}
+.info-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  padding: 1.5rem; border-radius: 4px;
+}
+.info-card h3 {
+  font-size:0.85rem; color: var(--cyber-cyan); letter-spacing:2px;
+  margin-bottom:0.8rem; text-shadow: var(--glow-cyan);
+}
+.info-card p, .info-card .math {
+  font-size:0.72rem; color: var(--text-dim); line-height:1.7;
+}
+.info-card .math { color: var(--accent-gold); }
+
+footer {
+  text-align:center; padding:2rem; border-top:1px solid var(--border);
+  font-size:0.7rem; color: var(--text-dim); margin-top:3rem;
+}
+</style>
+</head>
+<body>
+
+<!-- Overlays -->
+<div class="scanlines"></div>
+<div class="grain"></div>
+<div class="flicker"></div>
+
+<!-- Nav -->
+<nav>
+  <div class="logo">&lt;<span>E</span>_MOTION&nbsp;/&gt;</div>
+  <div class="menu">
+    <a href="#home">HOME</a>
+    <a href="#lab">SIMULATION</a>
+    <a href="#theory">THEORY</a>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section id="home" class="hero">
+  <h1>ELECTRON <span class="red">TRAPPED</span></h1>
+  <p class="subtitle">CYLINDRICAL TIME-VARYING MAGNETIC FIELD</p>
+  <div class="equation">B = B&#x2080; sin(&omega;t) e&#x2090;&emsp;|&emsp;r&#x2080; = R/2</div>
+  <div class="scroll-hint">[ SCROLL DOWN TO ENTER LAB ]</div>
+</section>
+
+<!-- Simulation -->
+<section id="lab">
+  <div class="section-title">SIMULATION LAB</div>
+  <div id="sim-container">
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <div class="readout" id="readout">
+    <div class="item">TIME <span id="ro-time">0.00</span>s</div>
+    <div class="item">R <span id="ro-radius">R/2</span></div>
+    <div class="item">SPEED <span id="ro-speed">0.00</span></div>
+    <div class="item">&omega;<sub>c</sub>/&omega; <span id="ro-ratio">0.63</span></div>
+    <div class="item">q <span id="ro-q">0.10</span></div>
+    <div class="item">BOUND <span id="ro-bound">YES</span></div>
+  </div>
+
+  <div class="controls">
+    <div class="ctrl-group">
+      <h3>MASTER</h3>
+      <button id="btn-power" class="active">POWER : ON</button>
+      <button id="btn-reset">RESET SYSTEM</button>
+      <button id="btn-screenshot" class="danger">CAPTURE FRAME</button>
+    </div>
+    <div class="ctrl-group">
+      <h3>FIELD PARAMS</h3>
+      <label>B&#x2080; Magnitude <span id="val-b0">1.26</span></label>
+      <input type="range" id="slider-b0" min="0.1" max="6" step="0.01" value="1.26">
+      <label>&omega; Frequency <span id="val-omega">1.00</span></label>
+      <input type="range" id="slider-omega" min="0.2" max="4" step="0.01" value="1.0">
+    </div>
+    <div class="ctrl-group">
+      <h3>VISUAL</h3>
+      <label>Trail Length <span id="val-trail">300</span></label>
+      <input type="range" id="slider-trail" min="50" max="800" step="10" value="300">
+      <button id="btn-trails">CLEAR TRAILS</button>
+      <button id="btn-grid">GRID : ON</button>
+    </div>
+    <div class="ctrl-group">
+      <h3>AUDIO SYNTH</h3>
+      <button id="btn-synth">SYNTH : OFF</button>
+      <p style="font-size:0.6rem; color:var(--text-dim); margin-top:0.5rem;">
+        Freq &prop; electron speed<br>Headphone warning
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- Theory -->
+<section id="theory">
+  <div class="section-title">THEORY NOTES</div>
+  <div class="info-grid">
+    <div class="info-card">
+      <h3>INDUCED E-FIELD</h3>
+      <p>By Faraday's law &amp; cylindrical symmetry:</p>
+      <p class="math">E&#x1D9C; = &minus;&half;B&#x2080;&omega; r cos(&omega;t)</p>
+      <p>Vortex field, &prop; r inside cylinder.</p>
+    </div>
+    <div class="info-card">
+      <h3>EQUATION OF MOTION</h3>
+      <p>Canonical angular momentum conserved:</p>
+      <p class="math">&#x3C6;&#x307; = &omega;<sub>c</sub> sin(&omega;t)</p>
+      <p class="math">r&#x308; + &omega;<sub>c</sub>&sup2; sin&sup2;(&omega;t) r = 0</p>
+      <p>Mathieu equation &rarr; parametric oscillator.</p>
+    </div>
+    <div class="info-card">
+      <h3>CONFINEMENT</h3>
+      <p>Stable when Mathieu parameter q avoids resonance bands:</p>
+      <p class="math">q = &omega;<sub>c</sub>&sup2; / (4&omega;&sup2;) &notin; (0.46, 1.15)</p>
+      <p>&omega;<sub>c</sub> = eB&#x2080; / (2m)</p>
+    </div>
+    <div class="info-card">
+      <h3>PERIODICITY</h3>
+      <p>Radial &amp; angular frequencies generally incommensurate:</p>
+      <p class="math">&nu; &mdash; Floquet exponent (irrational)</p>
+      <p>Motion is quasi-periodic, trajectory never exactly closes.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  &copy; 2026 CYBERPUNK PHYSICS LAB // ELECTRON MOTION IN TIME-VARYING MAGNETIC FIELD
+</footer>
+
+<script>
+// ============================================
+// PHYSICS SIMULATION & RENDERING ENGINE
+// ============================================
+
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+const container = document.getElementById('sim-container');
+
+// ─── State ───
+const state = {
+  running: true,
+  time: 0,
+  // physics
+  omega:   1.0,
+  omega_c: 0.632,  // eB₀/(2m), starts in stable regime (q≈0.1)
+  r:       0,      // will be set in resize
+  rdot:    0,
+  phi:     Math.PI / 2,
+  centerX: 0,
+  centerY: 0,
+  R_vis:   0,
+  r0:      0,
+  // trail
+  trails: [],
+  maxTrail: 300,
+  // display
+  showGrid: true,
+  // audio
+  audioCtx: null,
+  synthOsc: null,
+  synthGain: null,
+  synthOn: false,
+};
+
+// ─── Resize ───
+function resize() {
+  const w = container.clientWidth;
+  const h = container.clientHeight;
+  canvas.width  = w;
+  canvas.height = h;
+  state.centerX = w * 0.5;
+  state.centerY = h * 0.45;
+  state.R_vis  = Math.min(w, h) * 0.38;
+  state.r0     = state.R_vis / 2;
+  state.r      = state.r0;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ─── ODE Integration (RK4) ───
+function derivatives(r, rdot, phi, t) {
+  const swt = Math.sin(state.omega * t);
+  const r_ddot = -state.omega_c * state.omega_c * swt * swt * r;
+  const phi_dot = state.omega_c * swt;
+  return { r_ddot, phi_dot };
+}
+
+function physicsStep(dt) {
+  // RK4 for (r, rdot, phi) system
+  let r = state.r, v = state.rdot, phi = state.phi, t = state.time;
+
+  const f = (rr, vv, pp, tt) => {
+    const d = derivatives(rr, vv, pp, tt);
+    return [vv, d.r_ddot, d.phi_dot];
+  };
+
+  // k1
+  const [k1r, k1v, k1p] = f(r, v, phi, t);
+  // k2
+  const [k2r, k2v, k2p] = f(r + 0.5*dt*k1r, v + 0.5*dt*k1v, phi + 0.5*dt*k1p, t + 0.5*dt);
+  // k3
+  const [k3r, k3v, k3p] = f(r + 0.5*dt*k2r, v + 0.5*dt*k2v, phi + 0.5*dt*k2p, t + 0.5*dt);
+  // k4
+  const [k4r, k4v, k4p] = f(r + dt*k3r, v + dt*k3v, phi + dt*k3p, t + dt);
+
+  state.r    += dt * (k1r + 2*k2r + 2*k3r + k4r) / 6;
+  state.rdot += dt * (k1v + 2*k2v + 2*k3v + k4v) / 6;
+  state.phi  += dt * (k1p + 2*k2p + 2*k3p + k4p) / 6;
+  state.time += dt;
+}
+
+// ─── Speed-to-color mapping ───
+function speedToColor(speed, maxSpeed) {
+  // Low speed = cyan, high speed = magenta/pink
+  const t = Math.min(speed / maxSpeed, 1);
+  // HSL: cyan(180°) → blue(240°) → purple(280°) → red-pink(340°)
+  const hue = 180 + t * 160; // 180→340
+  const sat = 80 + t * 20;
+  const light = 50 + t * 20;
+  const alpha = 0.4 + t * 0.6;
+  return { h: hue, s: sat, l: light, a: alpha };
+}
+
+// ─── Draw ───
+let lastX = 0, lastY = 0;
+
+function worldPos() {
+  const x = state.centerX + state.r * Math.cos(state.phi);
+  const y = state.centerY - state.r * Math.sin(state.phi);
+  return { x, y };
+}
+
+function draw() {
+  const w = canvas.width, h = canvas.height, cx = state.centerX, cy = state.centerY;
+  ctx.clearRect(0, 0, w, h);
+
+  // Background
+  ctx.fillStyle = '#020208';
+  ctx.fillRect(0, 0, w, h);
+
+  // Grid
+  if (state.showGrid) {
+    ctx.strokeStyle = 'rgba(20,20,50,0.4)';
+    ctx.lineWidth = 0.5;
+    const gs = 40;
+    for (let x = gs; x < w; x += gs) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+    for (let y = gs; y < h; y += gs) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+  }
+
+  // Coordinate axes
+  const axLen = state.R_vis * 1.35;
+  ctx.strokeStyle = 'rgba(60,60,100,0.5)';
+  ctx.lineWidth = 0.8;
+  ctx.beginPath(); ctx.moveTo(cx - axLen, cy); ctx.lineTo(cx + axLen, cy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx, cy - axLen); ctx.lineTo(cx, cy + axLen); ctx.stroke();
+  // Labels
+  ctx.fillStyle = '#555577'; ctx.font = '12px "Share Tech Mono"';
+  ctx.fillText('x', cx + axLen + 5, cy + 4);
+  ctx.fillText('y', cx + 4, cy - axLen - 5);
+
+  // Cylinder boundary glow
+  const grad = ctx.createRadialGradient(cx, cy, state.R_vis * 0.8, cx, cy, state.R_vis * 1.05);
+  grad.addColorStop(0, 'transparent');
+  grad.addColorStop(0.5, 'rgba(0,229,255,0.06)');
+  grad.addColorStop(1, 'transparent');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(cx, cy, state.R_vis * 1.1, 0, Math.PI * 2); ctx.fill();
+
+  // Cylinder circle
+  ctx.strokeStyle = '#2a4a6a';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = 'rgba(0,180,255,0.3)';
+  ctx.shadowBlur = 8;
+  ctx.beginPath(); ctx.arc(cx, cy, state.R_vis, 0, Math.PI * 2); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // R label
+  ctx.fillStyle = '#4477aa'; ctx.font = '14px "Share Tech Mono"';
+  ctx.fillText('R', cx + state.R_vis + 6, cy + 4);
+
+  // Magnetic field symbol (pulsing)
+  const bPulse = 0.7 + 0.3 * Math.sin(state.time * state.omega * 3);
+  ctx.fillStyle = `rgba(255,153,68,${0.5 + 0.3*bPulse})`;
+  ctx.font = 'bold 36px "Share Tech Mono"';
+  ctx.textAlign = 'center';
+  ctx.shadowColor = `rgba(255,153,68,${0.3*bPulse})`;
+  ctx.shadowBlur = 12;
+  ctx.fillText('\u2299', cx, cy + 10);
+  ctx.shadowBlur = 0;
+  ctx.textAlign = 'start';
+
+  // B(t) formula
+  ctx.fillStyle = '#ff9944'; ctx.font = '11px "Share Tech Mono"';
+  const bLabel = `B=B\u2080 sin(\u03C9t)`;
+  ctx.fillText(bLabel, cx - 45, cy + 28);
+
+  // ─── Trails ───
+  const pos = worldPos();
+  const dx = pos.x - lastX, dy = pos.y - lastY;
+  const speed = Math.sqrt(dx*dx + dy*dy);
+  lastX = pos.x; lastY = pos.y;
+
+  if (state.running) {
+    const maxSpd = state.omega_c * state.R_vis * 0.8;
+    const col = speedToColor(speed, maxSpd);
+    state.trails.push({
+      x: pos.x, y: pos.y,
+      h: col.h, s: col.s, l: col.l, a: col.a,
+    });
+    if (state.trails.length > state.maxTrail) state.trails.shift();
+  }
+
+  // Draw trail (multiple passes for glow)
+  if (state.trails.length > 1) {
+    // Outer glow pass
+    ctx.lineWidth = 5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (let i = 1; i < state.trails.length; i++) {
+      const p = state.trails[i];
+      const alpha = (i / state.trails.length) * p.a * 0.35;
+      ctx.strokeStyle = `hsla(${p.h},${p.s}%,${p.l}%,${alpha})`;
+      ctx.beginPath();
+      ctx.moveTo(state.trails[i-1].x, state.trails[i-1].y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+    // Core pass
+    ctx.lineWidth = 2.5;
+    for (let i = 1; i < state.trails.length; i++) {
+      const p = state.trails[i];
+      const alpha = (i / state.trails.length) * p.a * 0.9;
+      ctx.strokeStyle = `hsla(${p.h},${p.s+10}%,${p.l+15}%,${alpha})`;
+      ctx.beginPath();
+      ctx.moveTo(state.trails[i-1].x, state.trails[i-1].y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+  }
+
+  // ─── Vortex E-field (subtle) ───
+  const eRings = [0.22, 0.45, 0.68, 0.88];
+  const eAngles = [6, 8, 10, 14];
+  const eAlpha = 0.12 + 0.08 * Math.cos(state.time * state.omega);
+  for (let ri = 0; ri < eRings.length; ri++) {
+    const rr = eRings[ri] * state.R_vis;
+    const na = eAngles[ri];
+    ctx.fillStyle = `rgba(0,229,255,${eAlpha * (0.4 + 0.6 * (ri+1)/eRings.length)})`;
+    for (let j = 0; j < na; j++) {
+      const ang = 2 * Math.PI * j / na + ri * 0.2;
+      const ex = cx + rr * Math.cos(ang);
+      const ey = cy - rr * Math.sin(ang);
+      // tiny tangential tick
+      const tx = -Math.sin(ang) * 4;
+      const ty = -Math.cos(ang) * 4;
+      ctx.beginPath();
+      ctx.moveTo(ex - tx, ey - ty);
+      ctx.lineTo(ex + tx, ey + ty);
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = `rgba(0,229,255,${eAlpha})`;
+      ctx.stroke();
+    }
+  }
+
+  // ─── Electron ───
+  // Glow
+  const glowGrad = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, 18);
+  const trailCol = state.trails.length > 0
+    ? state.trails[state.trails.length-1]
+    : { h: 180, s: 80, l: 50 };
+  glowGrad.addColorStop(0, `hsla(${trailCol.h},100%,70%,0.9)`);
+  glowGrad.addColorStop(0.4, `hsla(${trailCol.h},100%,50%,0.3)`);
+  glowGrad.addColorStop(1, 'transparent');
+  ctx.fillStyle = glowGrad;
+  ctx.beginPath(); ctx.arc(pos.x, pos.y, 18, 0, Math.PI * 2); ctx.fill();
+
+  // Core
+  ctx.fillStyle = '#fff';
+  ctx.shadowColor = '#fff';
+  ctx.shadowBlur = 8;
+  ctx.beginPath(); ctx.arc(pos.x, pos.y, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // e- label
+  ctx.fillStyle = '#00e5ff'; ctx.font = '13px "Share Tech Mono"';
+  ctx.fillText('e\u207B', pos.x + 10, pos.y - 4);
+
+  // ─── Readout update ───
+  document.getElementById('ro-time').textContent   = state.time.toFixed(2);
+  document.getElementById('ro-radius').textContent  = (state.r / state.R_vis).toFixed(2) + ' R';
+  document.getElementById('ro-speed').textContent   = speed.toFixed(2);
+  const ratio = state.omega_c / state.omega;
+  document.getElementById('ro-ratio').textContent   = ratio.toFixed(2);
+  document.getElementById('ro-q').textContent       = (ratio*ratio/4).toFixed(3);
+  const bound = state.r < state.R_vis * 0.98;
+  const boundEl = document.getElementById('ro-bound');
+  boundEl.textContent = bound ? 'YES' : 'NO';
+  boundEl.style.color = bound ? '#44cc44' : '#ff3366';
+}
+
+// ─── Audio ───
+function initAudio() {
+  if (state.audioCtx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  state.audioCtx = new AC();
+  state.synthOsc = state.audioCtx.createOscillator();
+  state.synthOsc.type = 'sawtooth';
+  const filt = state.audioCtx.createBiquadFilter();
+  filt.type = 'lowpass'; filt.frequency.value = 800; filt.Q.value = 4;
+  state.synthGain = state.audioCtx.createGain();
+  state.synthGain.gain.value = 0;
+  state.synthOsc.connect(filt);
+  filt.connect(state.synthGain);
+  state.synthGain.connect(state.audioCtx.destination);
+  state.synthOsc.start();
+}
+
+function updateAudio(speed) {
+  if (!state.audioCtx || !state.synthOn || !state.running) {
+    if (state.synthGain) state.synthGain.gain.setTargetAtTime(0, state.audioCtx.currentTime, 0.05);
+    return;
+  }
+  const norm = Math.min(speed / (state.omega_c * state.R_vis * 0.3), 1);
+  const freq = 80 + norm * 600;
+  state.synthOsc.frequency.setTargetAtTime(freq, state.audioCtx.currentTime, 0.08);
+  state.synthGain.gain.setTargetAtTime(0.06, state.audioCtx.currentTime, 0.08);
+}
+
+// ─── Loop ───
+let lastTime = performance.now();
+
+function loop(now) {
+  const dt = Math.min((now - lastTime) / 1000, 0.05); // cap at 50ms
+  lastTime = now;
+
+  if (state.running) {
+    const subSteps = 4;
+    const subDt = dt / subSteps;
+    for (let i = 0; i < subSteps; i++) physicsStep(subDt);
+    // Reset if escaped
+    if (state.r > state.R_vis * 1.5) resetSim();
+  }
+
+  const pos = worldPos();
+  const speed = Math.sqrt((pos.x - lastX)*(pos.x - lastX) + (pos.y - lastY)*(pos.y - lastY));
+  updateAudio(speed);
+
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function resetSim() {
+  state.time = 0;
+  state.r    = state.r0;
+  state.rdot = 0;
+  state.phi  = Math.PI / 2;
+  state.trails = [];
+  lastX = state.centerX;
+  lastY = state.centerY - state.r0;
+}
+
+// ─── Controls ───
+document.getElementById('btn-power').addEventListener('click', function() {
+  state.running = !state.running;
+  this.classList.toggle('active');
+  this.textContent = state.running ? 'POWER : ON' : 'POWER : OFF';
+  if (!state.running && state.synthGain) {
+    state.synthGain.gain.setTargetAtTime(0, state.audioCtx.currentTime, 0.05);
+  }
+});
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+  state.trails = [];
+  resetSim();
+});
+
+document.getElementById('btn-screenshot').addEventListener('click', () => {
+  const wasRunning = state.running;
+  state.running = false;
+  draw();
+  const link = document.createElement('a');
+  link.download = `electron_motion_${Date.now()}.png`;
+  link.href = canvas.toDataURL();
+  link.click();
+  if (wasRunning) state.running = true;
+});
+
+document.getElementById('slider-b0').addEventListener('input', function() {
+  const val = parseFloat(this.value);
+  state.omega_c = val / 2; // B₀ = val, ω_c = eB₀/(2m) with e/(2m)=0.5
+  document.getElementById('val-b0').textContent = val.toFixed(2);
+  resetSim();
+});
+
+document.getElementById('slider-omega').addEventListener('input', function() {
+  state.omega = parseFloat(this.value);
+  document.getElementById('val-omega').textContent = state.omega.toFixed(2);
+  resetSim();
+});
+
+document.getElementById('slider-trail').addEventListener('input', function() {
+  state.maxTrail = parseInt(this.value);
+  document.getElementById('val-trail').textContent = state.maxTrail;
+});
+
+document.getElementById('btn-trails').addEventListener('click', () => {
+  state.trails = [];
+});
+
+document.getElementById('btn-grid').addEventListener('click', function() {
+  state.showGrid = !state.showGrid;
+  this.classList.toggle('active');
+  this.textContent = state.showGrid ? 'GRID : ON' : 'GRID : OFF';
+});
+
+document.getElementById('btn-synth').addEventListener('click', function() {
+  if (!state.audioCtx) initAudio();
+  state.synthOn = !state.synthOn;
+  this.classList.toggle('active');
+  this.textContent = state.synthOn ? 'SYNTH : ON' : 'SYNTH : OFF';
+  if (!state.synthOn && state.synthGain) {
+    state.synthGain.gain.setTargetAtTime(0, state.audioCtx.currentTime, 0.05);
+  }
+});
+
+// ─── Init ───
+lastX = state.centerX;
+lastY = state.centerY - state.r0;
+resize();
+resetSim();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
